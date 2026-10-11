@@ -1,176 +1,153 @@
--- Steep Steps - Script para movil (Delta)
--- Botones: VOLAR, SUBIR, BAJAR, ESCALERA, + y -
+-- SteepFlight v3 - Controla TU escalera como plataforma voladora
+-- Para Delta (telefono). Pegar y ejecutar.
 
--- 1) SERVICIOS: son "herramientas" que Roblox nos da
 local Players = game:GetService("Players")
 local RunService = game:GetService("RunService")
-
 local player = Players.LocalPlayer
 
--- 2) CONFIGURACION: cambia estos numeros a tu gusto
-local velocidad = 50        -- velocidad de vuelo
-local velocidadMin, velocidadMax = 10, 200
-local distanciaEscalera = 15 -- que tan cerca debe estar la escalera para agarrarla
-
--- 3) VARIABLES DE ESTADO: guardan lo que esta pasando
+local VELOCIDAD = 16
 local volando = false
-local subiendo, bajando = false, false
-local escaleraAgarrada = nil
-local bodyVel, bodyGyro
+local escalera = nil
+local subir = false
+local bajar = false
+local conexion = nil
 
--- Devuelve las partes del personaje (se vuelve a llamar si mueres)
-local function getChar()
-	local char = player.Character or player.CharacterAdded:Wait()
-	return char, char:WaitForChild("Humanoid"), char:WaitForChild("HumanoidRootPart")
-end
-
--- 4) VOLAR
-local function empezarVuelo()
-	local _, hum, root = getChar()
-	volando = true
-	hum.PlatformStand = true -- el personaje deja de caminar/caer
-
-	bodyVel = Instance.new("BodyVelocity")
-	bodyVel.MaxForce = Vector3.new(1e9, 1e9, 1e9)
-	bodyVel.Velocity = Vector3.zero
-	bodyVel.Parent = root
-
-	bodyGyro = Instance.new("BodyGyro")
-	bodyGyro.MaxTorque = Vector3.new(1e9, 1e9, 1e9)
-	bodyGyro.P = 9e4
-	bodyGyro.Parent = root
-end
-
-local function pararVuelo()
-	volando = false
-	local _, hum = getChar()
-	hum.PlatformStand = false
-	if bodyVel then bodyVel:Destroy() bodyVel = nil end
-	if bodyGyro then bodyGyro:Destroy() bodyGyro = nil end
-end
-
--- 5) ESCALERA: busca la parte con "ladder"/"escalera"/"step" mas cercana
-local function buscarEscalera()
-	local _, _, root = getChar()
-	local mejor, mejorDist = nil, distanciaEscalera
-	for _, obj in ipairs(workspace:GetDescendants()) do
+-- Buscar TU escalera: la que esta dentro de tu personaje o con tu nombre
+local function buscarMiEscalera()
+	local char = player.Character
+	if not char then return nil end
+	-- 1. Busca dentro de tu personaje (escalera equipada / backpack / accesorio)
+	for _, obj in ipairs(char:GetDescendants()) do
 		if obj:IsA("BasePart") then
-			local n = obj.Name:lower()
-			if n:find("ladder") or n:find("escalera") or n:find("step") then
-				local d = (obj.Position - root.Position).Magnitude
-				if d < mejorDist then mejor, mejorDist = obj, d end
+			local n = string.lower(obj.Name)
+			if string.find(n, "ladder") or string.find(n, "escalera") or string.find(n, "step") then
+				return obj
 			end
 		end
 	end
-	return mejor
+	-- 2. Busca en el mapa una pieza que coincida con tu nombre de usuario
+	for _, obj in ipairs(workspace:GetDescendants()) do
+		if obj:IsA("BasePart") then
+			local n = string.lower(obj.Name)
+			if (string.find(n, "ladder") or string.find(n, "escalera") or string.find(n, "step"))
+				and string.find(n, string.lower(player.Name)) then
+				return obj
+			end
+		end
+	end
+	return nil
 end
 
-local function alternarEscalera()
-	if escaleraAgarrada then
-		escaleraAgarrada = nil
-		return "ESCALERA"
-	end
-	local e = buscarEscalera()
-	if e then
-		escaleraAgarrada = e
-		if not volando then empezarVuelo() end
-		return "SOLTAR"
-	end
-	return "ESCALERA"
-end
-
--- 6) BOTONES EN PANTALLA
+-- Interfaz tactil en pantalla
 local gui = Instance.new("ScreenGui")
-gui.Name = "SteepStepsMovil"
+gui.Name = "SteepFlightGUI"
 gui.ResetOnSpawn = false
--- En Delta se usa gethui() para que el menu no se borre; si no existe, usamos PlayerGui
-local ok, contenedor = pcall(function() return gethui() end)
-gui.Parent = (ok and contenedor) or player:WaitForChild("PlayerGui")
+gui.Parent = player:WaitForChild("PlayerGui")
 
-local function crearBoton(texto, x, y)
+local function boton(texto, x, y, color)
 	local b = Instance.new("TextButton")
-	b.Size = UDim2.new(0, 80, 0, 50)
-	b.Position = UDim2.new(1, x, 1, y) -- esquina inferior derecha
+	b.Size = UDim2.new(0, 90, 0, 50)
+	b.Position = UDim2.new(1, x, 1, y)
+	b.BackgroundColor3 = color
+	b.TextColor3 = Color3.new(1, 1, 1)
 	b.Text = texto
-	b.TextScaled = true
-	b.BackgroundColor3 = Color3.fromRGB(30, 30, 30)
-	b.BackgroundTransparency = 0.3
-	b.TextColor3 = Color3.fromRGB(255, 255, 255)
+	b.Font = Enum.Font.GothamBold
+	b.TextSize = 14
 	b.Parent = gui
-	Instance.new("UICorner", b).CornerRadius = UDim.new(0, 10)
+	local c = Instance.new("UICorner")
+	c.CornerRadius = UDim.new(0, 10)
+	c.Parent = b
 	return b
 end
 
-local btnVolar    = crearBoton("VOLAR",    -180, -300)
-local btnEscalera = crearBoton("ESCALERA", -90,  -300)
-local btnSubir    = crearBoton("SUBIR",    -180, -240)
-local btnBajar    = crearBoton("BAJAR",    -90,  -240)
-local btnMas      = crearBoton("+",        -180, -360)
-local btnMenos    = crearBoton("-",        -90,  -360)
-local etiqueta    = crearBoton("Vel: " .. velocidad, -180, -410)
-etiqueta.Size = UDim2.new(0, 170, 0, 40)
-etiqueta.AutoButtonColor = false
+local aviso = Instance.new("TextLabel")
+aviso.Size = UDim2.new(0, 260, 0, 30)
+aviso.Position = UDim2.new(0.5, -130, 0, 10)
+aviso.BackgroundColor3 = Color3.fromRGB(30, 30, 30)
+aviso.TextColor3 = Color3.new(1, 1, 1)
+aviso.Text = "SteepFlight cargado"
+aviso.Font = Enum.Font.GothamBold
+aviso.TextSize = 13
+aviso.Parent = gui
+local ac = Instance.new("UICorner")
+ac.CornerRadius = UDim.new(0, 8)
+ac.Parent = aviso
 
--- 7) QUE HACE CADA BOTON
-btnVolar.Activated:Connect(function()
-	if volando then pararVuelo() escaleraAgarrada = nil btnEscalera.Text = "ESCALERA"
-	else empezarVuelo() end
-	btnVolar.Text = volando and "ATERRIZAR" or "VOLAR"
-end)
+local function mensaje(t)
+	aviso.Text = t
+	task.delay(2, function()
+		aviso.Text = "SteepFlight"
+	end)
+end
 
-btnEscalera.Activated:Connect(function()
-	btnEscalera.Text = alternarEscalera()
-	btnVolar.Text = volando and "ATERRIZAR" or "VOLAR"
-end)
+local bVolar = boton("VOLAR", -200, -120, Color3.fromRGB(0, 170, 80))
+local bSubir = boton("SUBIR", -105, -180, Color3.fromRGB(60, 60, 200))
+local bBajar = boton("BAJAR", -105, -60, Color3.fromRGB(60, 60, 200))
+local bMas = boton("+", -200, -180, Color3.fromRGB(90, 90, 90))
+local bMenos = boton("-", -200, -60, Color3.fromRGB(90, 90, 90))
 
--- SUBIR/BAJAR: funcionan mientras mantienes el dedo
-btnSubir.MouseButton1Down:Connect(function() subiendo = true end)
-btnSubir.MouseButton1Up:Connect(function() subiendo = false end)
-btnSubir.MouseLeave:Connect(function() subiendo = false end)
-btnBajar.MouseButton1Down:Connect(function() bajando = true end)
-btnBajar.MouseButton1Up:Connect(function() bajando = false end)
-btnBajar.MouseLeave:Connect(function() bajando = false end)
+-- Movimiento: la escalera se mueve y mueve tu personaje al mismo tiempo
+local function empezarVuelo()
+	if conexion then conexion:Disconnect() end
+	conexion = RunService.Heartbeat:Connect(function()
+		if not volando or not escalera or not escalera.Parent then return end
+		local char = player.Character
+		local root = char and char:FindFirstChild("HumanoidRootPart")
+		if not root then return end
+		local dir = Vector3.zero
+		local hum = char:FindFirstChildOfClass("Humanoid")
+		if hum then dir = hum.MoveDirection end
+		local mov = dir * VELOCIDAD
+		if subir then mov = mov + Vector3.new(0, VELOCIDAD, 0) end
+		if bajar then mov = mov - Vector3.new(0, VELOCIDAD, 0) end
+		local delta = mov * (1 / 60)
+		escalera.CFrame = escalera.CFrame + delta
+		root.CFrame = root.CFrame + delta
+	end)
+end
 
-btnMas.Activated:Connect(function()
-	velocidad = math.min(velocidad + 10, velocidadMax)
-	etiqueta.Text = "Vel: " .. velocidad
-end)
-btnMenos.Activated:Connect(function()
-	velocidad = math.max(velocidad - 10, velocidadMin)
-	etiqueta.Text = "Vel: " .. velocidad
-end)
-
--- 8) BUCLE PRINCIPAL: se ejecuta en cada fotograma
-RunService.RenderStepped:Connect(function()
-	if not volando or not bodyVel then return end
-	local _, hum, root = getChar()
-	local cam = workspace.CurrentCamera
-
-	-- MoveDirection = hacia donde empujas el joystick
-	local dir = hum.MoveDirection * velocidad
-	local y = 0
-	if subiendo then y = velocidad end
-	if bajando then y = -velocidad end
-
-	-- Si tienes la escalera agarrada, la escalera viaja contigo
-	if escaleraAgarrada and escaleraAgarrada.Parent then
-		pcall(function()
-			escaleraAgarrada.Anchored = true
-			escaleraAgarrada.CFrame = root.CFrame * CFrame.new(0, 0, -3)
-		end)
+bVolar.MouseButton1Click:Connect(function()
+	if not volando then
+		escalera = buscarMiEscalera()
+		if not escalera then
+			mensaje("NO ENCONTRE TU ESCALERA")
+			return
+		end
+		escalera.Anchored = true
+		volando = true
+		bVolar.Text = "ATERRIZAR"
+		bVolar.BackgroundColor3 = Color3.fromRGB(200, 60, 60)
+		empezarVuelo()
+		mensaje("VOLANDO CON TU ESCALERA")
+	else
+		volando = false
+		if escalera and escalera.Parent then
+			escalera.Anchored = false
+		end
+		escalera = nil
+		bVolar.Text = "VOLAR"
+		bVolar.BackgroundColor3 = Color3.fromRGB(0, 170, 80)
+		mensaje("ATERRIZASTE")
 	end
-
-	bodyVel.Velocity = Vector3.new(dir.X, y, dir.Z)
-	bodyGyro.CFrame = cam.CFrame
 end)
 
--- 9) Si mueres, se reinicia todo
+bSubir.MouseButton1Down:Connect(function() subir = true end)
+bSubir.MouseButton1Up:Connect(function() subir = false end)
+bBajar.MouseButton1Down:Connect(function() bajar = true end)
+bBajar.MouseButton1Up:Connect(function() bajar = false end)
+
+bMas.MouseButton1Click:Connect(function()
+	VELOCIDAD = VELOCIDAD + 4
+	mensaje("Velocidad: " .. VELOCIDAD)
+end)
+bMenos.MouseButton1Click:Connect(function()
+	VELOCIDAD = math.max(4, VELOCIDAD - 4)
+	mensaje("Velocidad: " .. VELOCIDAD)
+end)
+
 player.CharacterAdded:Connect(function()
-	volando, escaleraAgarrada = false, nil
-	btnVolar.Text, btnEscalera.Text = "VOLAR", "ESCALERA"
-end)
-
-print("Steep Steps movil cargado")
-pcall(function()
-	game:GetService("StarterGui"):SetCore("SendNotification", {Title = "Steep Steps", Text = "Script cargado", Duration = 5})
+	volando = false
+	escalera = nil
+	bVolar.Text = "VOLAR"
+	bVolar.BackgroundColor3 = Color3.fromRGB(0, 170, 80)
 end)
