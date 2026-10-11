@@ -1,4 +1,5 @@
-]]
+-- Steep Steps - Script para movil (Delta)
+-- Botones: VOLAR, SUBIR, BAJAR, ESCALERA, + y -
 
 -- 1) SERVICIOS: son "herramientas" que Roblox nos da
 local Players = game:GetService("Players")
@@ -170,3 +171,6 @@ player.CharacterAdded:Connect(function()
 end)
 
 print("Steep Steps movil cargado")
+pcall(function()
+	game:GetService("StarterGui"):SetCore("SendNotification", {Title = "Steep Steps", Text = "Script cargado", Duration = 5})
+end)
